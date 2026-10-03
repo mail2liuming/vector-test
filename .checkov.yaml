@@ -1,0 +1,14 @@
+# Checkov config. Skips below are deliberate trade-offs for this exercise, each with a reason.
+framework:
+  - terraform
+skip-check:
+  # Public subnets are meant to give public IPs (internet-facing nginx hosts).
+  - CKV_AWS_130
+  # Port 80 is open only to 301-redirect to HTTPS.
+  - CKV_AWS_260
+  # Log groups use AWS-managed encryption and 14-day retention to keep demo cost low;
+  # production would use a CMK and >= 1 year retention.
+  - CKV_AWS_158
+  - CKV_AWS_338
+  # AZs are selected by state=available and sliced to az_count, so new AZs do not change the result.
+  - CKV_AWS_394

@@ -1,0 +1,17 @@
+# Copy to terraform.tfvars and adjust (all values optional).
+region = "ap-southeast-2"
+
+# Admin access (SSH/WinRM/RDP). Leave unset to auto-detect your current public IP.
+# Set it explicitly in CI, behind a VPN, or to allow several people.
+# admin_cidrs = ["203.0.113.10/32"]
+
+# Automation key pair (defaults shown). Create it once:
+#   ssh-keygen -t rsa -b 4096 -m PEM -f ~/.ssh/vector-test
+# public_key_path  = "~/.ssh/vector-test.pub"
+# private_key_path = "~/.ssh/vector-test"
+
+# Windows nginx host (bonus, off by default). Enable after the Linux host works.
+# enable_windows = true
+
+# Use the AMI built by Packer instead of stock Amazon Linux 2023
+# linux_ami_id = "ami-0123456789abcdef0"

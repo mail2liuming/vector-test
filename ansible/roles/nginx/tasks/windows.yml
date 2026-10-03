@@ -1,0 +1,121 @@
+---
+# Windows has no OpenSSL, so the key/cert are generated on the controller (kept under
+# .secrets/, gitignored, so reruns are idempotent) and copied to the host.
+- name: Create controller cert dir
+  ansible.builtin.file:
+    path: "{{ nginx_controller_cert_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+
+- name: Generate private key on controller
+  community.crypto.openssl_privatekey:
+    path: "{{ nginx_controller_cert_dir }}/server.key"
+    type: RSA
+    size: 2048
+  delegate_to: localhost
+
+- name: Generate CSR on controller
+  community.crypto.openssl_csr_pipe:
+    privatekey_path: "{{ nginx_controller_cert_dir }}/server.key"
+    common_name: "{{ nginx_cert_common_name }}"
+    subject_alt_name: "{{ nginx_cert_sans }}"
+  delegate_to: localhost
+  register: nginx_csr
+  changed_when: false
+
+- name: Generate self-signed certificate on controller
+  community.crypto.x509_certificate:
+    path: "{{ nginx_controller_cert_dir }}/server.crt"
+    csr_content: "{{ nginx_csr.csr }}"
+    privatekey_path: "{{ nginx_controller_cert_dir }}/server.key"
+    provider: selfsigned
+    selfsigned_not_after: "+{{ nginx_cert_days }}d"
+  delegate_to: localhost
+
+- name: Download nginx for Windows
+  ansible.windows.win_get_url:
+    url: "https://nginx.org/download/nginx-{{ nginx_windows_version }}.zip"
+    dest: 'C:\Windows\Temp\nginx-{{ nginx_windows_version }}.zip'
+
+- name: Extract nginx to {{ nginx_windows_dir }}
+  ansible.windows.win_shell: |
+    Expand-Archive -Path 'C:\Windows\Temp\nginx-{{ nginx_windows_version }}.zip' -DestinationPath 'C:\Windows\Temp\nginx-extract' -Force
+    Move-Item -Path 'C:\Windows\Temp\nginx-extract\nginx-{{ nginx_windows_version }}' -Destination '{{ nginx_windows_dir }}'
+  args:
+    creates: '{{ nginx_windows_dir }}\nginx.exe'
+
+- name: Create SSL directory
+  ansible.windows.win_file:
+    path: '{{ nginx_windows_dir }}\conf\ssl'
+    state: directory
+
+- name: Copy certificate and key
+  ansible.windows.win_copy:
+    src: "{{ nginx_controller_cert_dir }}/{{ item }}"
+    dest: '{{ nginx_windows_dir }}\conf\ssl\{{ item }}'
+  loop:
+    - server.crt
+    - server.key
+  notify: Reload nginx (Windows)
+
+- name: Deploy nginx.conf
+  ansible.windows.win_template:
+    src: nginx-windows.conf.j2
+    dest: '{{ nginx_windows_dir }}\conf\nginx.conf'
+  notify: Reload nginx (Windows)
+
+- name: Deploy landing page
+  ansible.windows.win_template:
+    src: index.html.j2
+    dest: '{{ nginx_windows_dir }}\html\index.html'
+
+- name: Validate nginx configuration
+  ansible.windows.win_command: nginx.exe -t
+  args:
+    chdir: "{{ nginx_windows_dir }}"
+  changed_when: false
+
+- name: Allow HTTP/HTTPS through Windows Firewall
+  community.windows.win_firewall_rule:
+    name: "nginx {{ item }}"
+    localport: "{{ item }}"
+    protocol: tcp
+    direction: in
+    action: allow
+    state: present
+    enabled: true
+  loop: [80, 443]
+
+- name: Run nginx at boot as SYSTEM
+  community.windows.win_scheduled_task:
+    name: nginx
+    description: nginx web server
+    actions:
+      - path: '{{ nginx_windows_dir }}\nginx.exe'
+        working_directory: "{{ nginx_windows_dir }}"
+    triggers:
+      - type: boot
+    username: SYSTEM
+    run_level: highest
+    execution_time_limit: PT0S # no time limit
+    state: present
+    enabled: true
+
+- name: Start nginx if not running
+  ansible.windows.win_shell: |
+    if (Get-Process -Name nginx -ErrorAction SilentlyContinue) { 'running' }
+    else { Start-ScheduledTask -TaskName nginx; Start-Sleep -Seconds 3; 'started' }
+  register: nginx_start
+  changed_when: "'started' in nginx_start.stdout"
+
+- name: Apply pending reloads before verifying
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify HTTPS responds locally
+  ansible.windows.win_uri:
+    url: https://localhost/
+    validate_certs: false
+    return_content: true
+  register: nginx_check
+  failed_when: nginx_check.status_code != 200 or 'nginx over HTTPS' not in nginx_check.content

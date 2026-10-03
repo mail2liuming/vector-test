@@ -1,0 +1,33 @@
+{% set is_windows = ansible_facts['os_family'] == 'Windows' %}
+{% set ssl_dir = 'ssl' if is_windows else nginx_ssl_dir %}
+{% set web_root = 'html' if is_windows else nginx_web_root %}
+    # Plain HTTP only redirects to HTTPS.
+    server {
+        listen 80 default_server;
+        server_name _;
+        return 301 https://$host$request_uri;
+    }
+
+    server {
+        listen 443 ssl default_server;
+        server_name {{ nginx_server_names | join(' ') }};
+
+        ssl_certificate     {{ ssl_dir }}/server.crt;
+        ssl_certificate_key {{ ssl_dir }}/server.key;
+        ssl_protocols       TLSv1.2 TLSv1.3;
+        ssl_prefer_server_ciphers off;
+{% if not is_windows %}
+        ssl_session_cache   shared:SSL:10m;
+{% endif %}
+        ssl_session_timeout 1d;
+
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header X-Content-Type-Options nosniff always;
+
+        root  {{ web_root }};
+        index index.html;
+
+        location / {
+            try_files $uri $uri/ =404;
+        }
+    }

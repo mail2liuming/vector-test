@@ -1,0 +1,22 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+.terraform.tfstate.lock.info
+
+# Generated secrets / inventory
+.secrets/
+ansible/inventory/hosts.yml
+*.retry
+
+# Packer
+packer_cache/
+packer/manifest.json
+*.tfplan
+tfplan
+
+# Local tool caches
+.ansible/

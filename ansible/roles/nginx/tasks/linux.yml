@@ -1,0 +1,74 @@
+---
+- name: Install nginx and certificate tooling
+  ansible.builtin.package:
+    name:
+      - nginx
+      - python3-cryptography # required by community.crypto modules
+    state: present
+
+- name: Create SSL directory
+  ansible.builtin.file:
+    path: "{{ nginx_ssl_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Generate private key
+  community.crypto.openssl_privatekey:
+    path: "{{ nginx_ssl_dir }}/server.key"
+    type: RSA
+    size: 2048
+    mode: "0600"
+  notify: Reload nginx
+
+- name: Generate CSR
+  community.crypto.openssl_csr_pipe:
+    privatekey_path: "{{ nginx_ssl_dir }}/server.key"
+    common_name: "{{ nginx_cert_common_name }}"
+    subject_alt_name: "{{ nginx_cert_sans }}"
+  register: nginx_csr
+  changed_when: false
+
+- name: Generate self-signed certificate
+  community.crypto.x509_certificate:
+    path: "{{ nginx_ssl_dir }}/server.crt"
+    csr_content: "{{ nginx_csr.csr }}"
+    privatekey_path: "{{ nginx_ssl_dir }}/server.key"
+    provider: selfsigned
+    selfsigned_not_after: "+{{ nginx_cert_days }}d"
+    mode: "0644"
+  notify: Reload nginx
+
+- name: Deploy nginx.conf (HTTP -> HTTPS redirect, TLS server)
+  ansible.builtin.template:
+    src: nginx-linux.conf.j2
+    dest: /etc/nginx/nginx.conf
+    owner: root
+    group: root
+    mode: "0644"
+    validate: nginx -t -c %s
+  notify: Reload nginx
+
+- name: Deploy landing page
+  ansible.builtin.template:
+    src: index.html.j2
+    dest: "{{ nginx_web_root }}/index.html"
+    mode: "0644"
+
+- name: Enable and start nginx
+  ansible.builtin.service:
+    name: nginx
+    state: started
+    enabled: true
+
+- name: Apply pending reloads before verifying
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify HTTPS responds locally
+  ansible.builtin.uri:
+    url: https://localhost/
+    validate_certs: false
+    return_content: true
+  register: nginx_check
+  failed_when: nginx_check.status != 200 or 'nginx over HTTPS' not in nginx_check.content
