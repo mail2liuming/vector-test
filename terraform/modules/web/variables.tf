@@ -9,13 +9,30 @@ variable "vpc_id" {
 }
 
 variable "subnet_ids" {
-  description = "Subnets for the hosts. Linux goes in the first, Windows in the second when there is one."
+  description = "Public subnets for the Windows host (second one when available)."
   type        = list(string)
 
   validation {
     condition     = length(var.subnet_ids) > 0
     error_message = "At least one subnet ID is required."
   }
+}
+
+variable "linux_subnet_id" {
+  description = "Subnet for the Linux host: a public subnet, or a private one when behind_alb is true."
+  type        = string
+}
+
+variable "behind_alb" {
+  description = "Run the Linux host from the Packer AMI in a private subnet, reachable only from the ALB."
+  type        = bool
+  default     = false
+}
+
+variable "alb_security_group_id" {
+  description = "Security group of the ALB (required when behind_alb is true)."
+  type        = string
+  default     = ""
 }
 
 variable "admin_cidrs" {
@@ -41,7 +58,7 @@ variable "linux_instance_type" {
 }
 
 variable "linux_ami_id" {
-  description = "Optional AMI for the Linux host (e.g. the Packer build). Empty means latest Amazon Linux 2023."
+  description = "Optional AMI for the Linux host. Empty: newest Packer AMI (tag Role=nginx-https) when behind_alb, else latest Amazon Linux 2023."
   type        = string
   default     = ""
 }

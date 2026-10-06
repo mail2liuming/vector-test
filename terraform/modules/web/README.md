@@ -4,7 +4,7 @@ nginx host(s) for the exercise:
 
 - IAM role + instance profile with only `AmazonSSMManagedInstanceCore` (Session Manager access; no other AWS API access needed)
 - Security group: 80/443 from `web_ingress_cidrs`; SSH (and WinRM/RDP when Windows is enabled) from `admin_cidrs` only
-- Amazon Linux 2023 instance (or `linux_ami_id`, e.g. the Packer AMI): IMDSv2 required, encrypted gp3, detailed monitoring
+- Linux instance: Amazon Linux 2023 in a public subnet, or – with `behind_alb` – the newest Packer AMI in a private subnet with no public IP, no SSH key and a security group that only allows HTTPS from the ALB. IMDSv2 required, encrypted gp3, detailed monitoring
 - Optional Windows Server 2022 instance with a WinRM HTTPS listener bootstrapped by user data, for Ansible
 
 nginx itself is installed and configured by Ansible (`ansible/`), not by this module.
@@ -47,11 +47,15 @@ No modules.
 | [aws_iam_role_policy_attachment.ssm_core](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_instance.linux](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/instance) | resource |
 | [aws_instance.windows](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/instance) | resource |
+| [aws_security_group.alb_target](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group.web](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
+| [aws_vpc_security_group_egress_rule.alb_target_all](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_security_group_egress_rule) | resource |
 | [aws_vpc_security_group_egress_rule.all](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_security_group_egress_rule) | resource |
 | [aws_vpc_security_group_ingress_rule.admin](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_security_group_ingress_rule) | resource |
+| [aws_vpc_security_group_ingress_rule.from_alb](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_security_group_ingress_rule) | resource |
 | [aws_vpc_security_group_ingress_rule.http](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_security_group_ingress_rule) | resource |
 | [aws_vpc_security_group_ingress_rule.https](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_security_group_ingress_rule) | resource |
+| [aws_ami_ids.packer](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ami_ids) | data source |
 | [aws_iam_policy_document.ec2_assume](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_ssm_parameter.al2023](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ssm_parameter) | data source |
 | [aws_ssm_parameter.windows2022](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ssm_parameter) | data source |
@@ -62,11 +66,14 @@ No modules.
 | ---- | ----------- | ---- | ------- | :------: |
 | admin\_cidrs | CIDRs allowed to reach SSH (22), and WinRM (5986) / RDP (3389) when Windows is enabled. | `list(string)` | n/a | yes |
 | key\_name | EC2 key pair name for SSH (Linux) and Administrator password encryption (Windows). | `string` | n/a | yes |
+| linux\_subnet\_id | Subnet for the Linux host: a public subnet, or a private one when behind\_alb is true. | `string` | n/a | yes |
 | project | Name prefix applied to every resource. | `string` | n/a | yes |
-| subnet\_ids | Subnets for the hosts. Linux goes in the first, Windows in the second when there is one. | `list(string)` | n/a | yes |
+| subnet\_ids | Public subnets for the Windows host (second one when available). | `list(string)` | n/a | yes |
 | vpc\_id | VPC to deploy the web hosts into. | `string` | n/a | yes |
+| alb\_security\_group\_id | Security group of the ALB (required when behind\_alb is true). | `string` | `""` | no |
+| behind\_alb | Run the Linux host from the Packer AMI in a private subnet, reachable only from the ALB. | `bool` | `false` | no |
 | enable\_windows | Also create a Windows Server 2022 nginx host. | `bool` | `false` | no |
-| linux\_ami\_id | Optional AMI for the Linux host (e.g. the Packer build). Empty means latest Amazon Linux 2023. | `string` | `""` | no |
+| linux\_ami\_id | Optional AMI for the Linux host. Empty: newest Packer AMI (tag Role=nginx-https) when behind\_alb, else latest Amazon Linux 2023. | `string` | `""` | no |
 | linux\_instance\_type | Instance type for the Linux nginx host. | `string` | `"t3.micro"` | no |
 | web\_ingress\_cidrs | CIDRs allowed to reach nginx on 80/443. | `list(string)` | <pre>[<br/>  "0.0.0.0/0"<br/>]</pre> | no |
 | windows\_instance\_type | Instance type for the Windows nginx host. | `string` | `"t3.medium"` | no |
@@ -77,9 +84,12 @@ No modules.
 | ---- | ----------- |
 | iam\_role\_arn | IAM role used by the web hosts. |
 | instance\_profile\_name | Instance profile of the web hosts (reusable, e.g. for Packer builds). |
+| linux\_ami\_id | AMI the Linux host runs. |
 | linux\_instance\_id | Instance ID of the Linux host. |
+| linux\_private\_ip | Private IP of the Linux host. |
 | linux\_public\_dns | Public DNS name of the Linux host. |
 | linux\_public\_ip | Public IP of the Linux host. |
+| linux\_security\_group\_id | Security group attached to the Linux host. |
 | security\_group\_id | Security group attached to the web hosts. |
 | windows\_instance\_id | Instance ID of the Windows host, or null. |
 | windows\_public\_dns | Public DNS name of the Windows host, or null. |

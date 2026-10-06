@@ -80,6 +80,18 @@ variable "linux_ami_id" {
   default     = ""
 }
 
+variable "enable_alb" {
+  description = "Run the Linux host from the Packer AMI in a private subnet behind an ALB (with a NAT gateway and S3 access logs)."
+  type        = bool
+  default     = false
+}
+
+variable "alb_certificate_arn" {
+  description = "ACM certificate for the ALB's HTTPS listener (required when enable_alb is true). Create with scripts/alb-selfsigned-cert.sh."
+  type        = string
+  default     = ""
+}
+
 variable "enable_windows" {
   description = "Also create the Windows Server 2022 nginx host (bonus). Off by default: verify Linux first, then set true."
   type        = bool

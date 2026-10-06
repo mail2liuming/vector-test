@@ -70,6 +70,7 @@ source "amazon-ebs" "al2023_nginx" {
     Name      = "vector-test-nginx-https"
     Project   = "vector-test"
     BuiltBy   = "packer"
+    Role      = "nginx-https" # Terraform finds the newest AMI by this tag
     SourceAMI = "{{ .SourceAMI }}"
   }
 }
@@ -102,6 +103,7 @@ build {
       "sudo tee /etc/systemd/system/nginx-selfsigned-firstboot.service >/dev/null <<'EOF'",
       "[Unit]",
       "Description=Generate per-instance self-signed TLS cert for nginx",
+      "After=cloud-init.service",
       "Before=nginx.service",
       "ConditionPathExists=!/etc/nginx/ssl/server.crt",
       "",

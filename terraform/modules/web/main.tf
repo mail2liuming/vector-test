@@ -100,17 +100,75 @@ data "aws_ssm_parameter" "windows2022" {
   name = "/aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base"
 }
 
+# AMIs built by Packer (packer/nginx-https.pkr.hcl), newest first. Used when the Linux host is
+# behind the ALB; aws_ami_ids returns an empty list instead of failing, so the precondition on
+# the instance can give a clear message.
+data "aws_ami_ids" "packer" {
+  count = var.behind_alb && var.linux_ami_id == "" ? 1 : 0
+
+  owners = ["self"]
+
+  filter {
+    name   = "tag:Role"
+    values = ["nginx-https"]
+  }
+}
+
+locals {
+  packer_ami_ids = var.behind_alb && var.linux_ami_id == "" ? data.aws_ami_ids.packer[0].ids : []
+
+  linux_ami = (
+    var.linux_ami_id != "" ? var.linux_ami_id :
+    var.behind_alb ? try(local.packer_ami_ids[0], "") :
+    nonsensitive(data.aws_ssm_parameter.al2023.value)
+  )
+}
+
+# ------------------------------------------- Linux SG when behind the ALB
+
+# Only the ALB may reach the host, on HTTPS. No SSH: admin access is via SSM.
+resource "aws_security_group" "alb_target" {
+  count = var.behind_alb ? 1 : 0
+
+  name        = "${var.project}-alb-target-sg"
+  description = "nginx behind the ALB: HTTPS from the ALB only"
+  vpc_id      = var.vpc_id
+
+  tags = { Name = "${var.project}-alb-target-sg" }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "from_alb" {
+  count = var.behind_alb ? 1 : 0
+
+  security_group_id            = aws_security_group.alb_target[0].id
+  description                  = "HTTPS from the ALB"
+  referenced_security_group_id = var.alb_security_group_id
+  ip_protocol                  = "tcp"
+  from_port                    = 443
+  to_port                      = 443
+}
+
+resource "aws_vpc_security_group_egress_rule" "alb_target_all" {
+  count = var.behind_alb ? 1 : 0
+
+  security_group_id = aws_security_group.alb_target[0].id
+  description       = "Outbound via the NAT gateway (SSM, OS updates)"
+  cidr_ipv4         = "0.0.0.0/0"
+  ip_protocol       = "-1"
+}
+
 # ---------------------------------------------------------------- Linux host
 
 resource "aws_instance" "linux" {
-  ami                    = var.linux_ami_id != "" ? var.linux_ami_id : nonsensitive(data.aws_ssm_parameter.al2023.value)
-  instance_type          = var.linux_instance_type
-  subnet_id              = var.subnet_ids[0]
-  vpc_security_group_ids = [aws_security_group.web.id]
-  iam_instance_profile   = aws_iam_instance_profile.web.name
-  key_name               = var.key_name
-  ebs_optimized          = true
-  monitoring             = true # 1-minute CloudWatch metrics
+  ami                         = local.linux_ami
+  instance_type               = var.linux_instance_type
+  subnet_id                   = var.linux_subnet_id
+  associate_public_ip_address = var.behind_alb ? false : null
+  vpc_security_group_ids      = var.behind_alb ? [aws_security_group.alb_target[0].id] : [aws_security_group.web.id]
+  iam_instance_profile        = aws_iam_instance_profile.web.name
+  key_name                    = var.behind_alb ? null : var.key_name # behind the ALB: no SSH, use SSM
+  ebs_optimized               = true
+  monitoring                  = true # 1-minute CloudWatch metrics
 
   metadata_options {
     http_tokens                 = "required" # IMDSv2 only
@@ -126,7 +184,17 @@ resource "aws_instance" "linux" {
   tags = { Name = "${var.project}-nginx-linux" }
 
   lifecycle {
-    ignore_changes = [ami] # don't replace the host when a newer AL2023 is published
+    ignore_changes = [ami] # don't replace the host when a newer AMI is published; use -replace to roll
+
+    precondition {
+      condition     = !var.behind_alb || var.alb_security_group_id != ""
+      error_message = "alb_security_group_id is required when behind_alb is true."
+    }
+
+    precondition {
+      condition     = local.linux_ami != ""
+      error_message = "No Packer AMI found (tag Role=nginx-https). Run 'packer build .' in packer/ first, or set linux_ami_id."
+    }
   }
 }
 

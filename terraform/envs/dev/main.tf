@@ -23,7 +23,7 @@ module "network" {
   project            = var.project
   vpc_cidr           = var.vpc_cidr
   az_count           = var.az_count
-  enable_nat_gateway = var.enable_nat_gateway
+  enable_nat_gateway = var.enable_nat_gateway || var.enable_alb # private hosts need outbound via NAT
 }
 
 module "web" {
@@ -31,7 +31,8 @@ module "web" {
 
   project           = var.project
   vpc_id            = module.network.vpc_id
-  subnet_ids        = module.network.public_subnet_ids # nginx must be reachable directly over HTTPS
+  subnet_ids        = module.network.public_subnet_ids # Windows host
+  linux_subnet_id   = var.enable_alb ? module.network.private_subnet_ids[0] : module.network.public_subnet_ids[0]
   admin_cidrs       = local.admin_cidrs
   web_ingress_cidrs = var.web_ingress_cidrs
   key_name          = aws_key_pair.admin.key_name
@@ -40,6 +41,22 @@ module "web" {
   linux_ami_id          = var.linux_ami_id
   enable_windows        = var.enable_windows
   windows_instance_type = var.windows_instance_type
+
+  behind_alb            = var.enable_alb
+  alb_security_group_id = var.enable_alb ? module.alb[0].security_group_id : ""
+}
+
+# Linux host from the Packer AMI behind an ALB (self-signed ACM cert, access logs in S3).
+module "alb" {
+  source = "../../modules/alb"
+  count  = var.enable_alb ? 1 : 0
+
+  project                  = var.project
+  vpc_id                   = module.network.vpc_id
+  public_subnet_ids        = module.network.public_subnet_ids
+  certificate_arn          = var.alb_certificate_arn
+  target_security_group_id = module.web.linux_security_group_id
+  target_instance_ids      = [module.web.linux_instance_id]
 }
 
 # ------------------------------------------------------------- Key pair
@@ -61,6 +78,7 @@ resource "local_file" "ansible_inventory" {
   content = templatefile("${path.module}/templates/inventory.yml.tftpl", {
     aws_region          = var.region
     private_key_path    = pathexpand(var.private_key_path)
+    enable_linux        = !var.enable_alb # behind the ALB the host is configured by the Packer AMI
     linux_ip            = module.web.linux_public_ip
     linux_dns           = module.web.linux_public_dns
     enable_windows      = var.enable_windows
