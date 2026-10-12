@@ -1,0 +1,3 @@
+# Copy to terraform.tfvars. All optional, see variables.tf.
+enable_alb          = true
+alb_certificate_arn = "arn:aws:acm:..."

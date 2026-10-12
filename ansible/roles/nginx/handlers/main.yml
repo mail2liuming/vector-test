@@ -1,0 +1,14 @@
+---
+- name: Reload nginx
+  ansible.builtin.service:
+    name: nginx
+    state: reloaded
+
+# nginx runs as SYSTEM, so "nginx -s reload" is denied: restart it via the scheduled task.
+- name: Reload nginx (Windows)
+  ansible.windows.win_shell: |
+    Stop-Process -Name nginx -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+    Start-ScheduledTask -TaskName nginx
+    Start-Sleep -Seconds 3
+    if (-not (Get-Process -Name nginx -ErrorAction SilentlyContinue)) { throw 'nginx did not start' }

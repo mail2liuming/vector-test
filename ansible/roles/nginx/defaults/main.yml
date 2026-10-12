@@ -1,0 +1,17 @@
+---
+nginx_server_names: ["{{ inventory_hostname }}"]
+
+nginx_cert_days: 365
+nginx_cert_common_name: "{{ nginx_server_names[0] }}"
+nginx_cert_sans: >-
+  {{ nginx_server_names
+     | map('ansible.builtin.regex_replace', '^(\d+\.\d+\.\d+\.\d+)$', 'IP:\1')
+     | map('ansible.builtin.regex_replace', '^(?!IP:)(.+)$', 'DNS:\1')
+     | list }}
+
+nginx_ssl_dir: /etc/nginx/ssl
+nginx_web_root: /usr/share/nginx/html
+
+nginx_windows_version: "1.28.0"
+nginx_windows_dir: 'C:\nginx'
+nginx_controller_cert_dir: "{{ playbook_dir }}/../.secrets/certs/{{ inventory_hostname }}"

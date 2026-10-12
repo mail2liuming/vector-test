@@ -1,0 +1,49 @@
+---
+- name: Install nginx with HTTPS (self-signed) on Linux hosts
+  hosts: linux
+  become: true
+  roles:
+    - nginx
+
+- name: Install nginx with HTTPS (self-signed) on Windows hosts
+  hosts: windows
+  gather_facts: false
+  pre_tasks:
+    - name: Fetch and decrypt the Administrator password
+      ansible.builtin.command:
+        argv:
+          - aws
+          - ec2
+          - get-password-data
+          - --region
+          - "{{ aws_region }}"
+          - --instance-id
+          - "{{ ec2_instance_id }}"
+          - --priv-launch-key
+          - "{{ ssh_private_key_path }}"
+          - --query
+          - PasswordData
+          - --output
+          - text
+      delegate_to: localhost
+      register: windows_admin_password
+      retries: 60
+      delay: 15
+      until: windows_admin_password.stdout | length > 0
+      changed_when: false
+      no_log: true
+
+    - name: Use the password for WinRM
+      ansible.builtin.set_fact:
+        ansible_password: "{{ windows_admin_password.stdout }}"
+      no_log: true
+
+    - name: Wait for WinRM
+      ansible.builtin.wait_for_connection:
+        timeout: 600
+
+    - name: Gather facts
+      ansible.builtin.setup:
+
+  roles:
+    - nginx
